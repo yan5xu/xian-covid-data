@@ -3,7 +3,9 @@
     "start": "ts-node src/index.ts"
   },
   "dependencies": {
-    "axios": "^0.24.0"
+    "@types/moment": "^2.13.0",
+    "axios": "^0.24.0",
+    "moment": "^2.29.1"
   },
   "devDependencies": {},
   "jest": {
