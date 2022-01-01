@@ -1,0 +1,18 @@
+{
+  "scripts": {
+    "start": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "axios": "^0.24.0"
+  },
+  "devDependencies": {},
+  "jest": {
+    "testEnvironment": "node"
+  },
+  "name": "xian-covid-data",
+  "version": "0.0.1",
+  "description": "西安疫情数据整理",
+  "main": "src/index.ts",
+  "author": "moji",
+  "license": "MIT"
+}
