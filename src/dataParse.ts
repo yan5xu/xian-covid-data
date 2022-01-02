@@ -1,9 +1,17 @@
 import * as fs from "fs";
 import * as moment from "moment";
 
-const getDayAndMonth = (str: string) => {
+const getNu = (month: number, day: number, nu: number) => {
+  const year = month === 12 ? 2021 : 2022;
+  return `${year}${month.toString().padStart(2, "0")}${day
+    .toString()
+    .padStart(2, "0")}-${nu.toString().padStart(3, "0")}`;
+};
+
+const getDayAndMonth = (str: string): moment.Moment => {
   const monthIndex = str.indexOf("月");
-  let month = 0,
+  let year = 2021,
+    month = 0,
     day = 0;
   try {
     month = parseInt(str.slice(monthIndex - 2, monthIndex));
@@ -15,11 +23,16 @@ const getDayAndMonth = (str: string) => {
   if (month < 1 || month > 12 || day < 1 || day > 31) {
     throw new Error(`获取隔离日期失败 ${str}`);
   }
+  if (month !== 12) {
+    year = 2022;
+  }
 
-  return { month, day };
+  return moment(
+    `${year}${month.toString().padStart(2)}${day.toString().padStart(2)}`
+  );
 };
 
-const getCityContryDistrict = (str: string) => {
+const getCityContryDistrict = (str: string): Address => {
   const cityIndex = str.indexOf("市");
   const countryIndex = str.indexOf("县");
   const districtIndex = str.indexOf("区");
@@ -28,18 +41,23 @@ const getCityContryDistrict = (str: string) => {
     disctrict =
       districtIndex > -1 ? str.slice(districtIndex + 1, districtIndex) : "";
 
-  return { city, country, disctrict };
+  return { city, country, disctrict } as any;
 };
 
-const lineParse = (line: string, index: number, date: moment.Moment) => {
+const lineParse = (line: string, index: number, date: moment.Moment): Node => {
   const year = parseInt(date.format("YYYY"));
   const month = parseInt(date.format("MM"));
   const day = parseInt(date.format("DD"));
   const preDate = date.clone().subtract(1, "days");
 
   try {
-    let info: Record<string, any> = {
+    let info: Node = {
       line,
+      nu: 0,
+      gender: Gender.Empty,
+      checkDay: undefined,
+      publishDay: undefined,
+      reason: Reason.其他原因,
     };
     const params: string[] = line
       .split("，")
@@ -52,10 +70,9 @@ const lineParse = (line: string, index: number, date: moment.Moment) => {
       throw new Error(`编号与行号不一致 ${index} ${line}`);
     }
     // Step 3.2 获取性别
-    info.gender = params[1];
+    info.gender = params[1] as Gender;
     if (info.gender !== "男" && info.gender !== "女") {
       console.error(`性别获取失败 ${index} ${line}`);
-      info.gender = "";
     }
     // Step 3.3 获取年龄
     info.age = parseInt(params[2].slice(0, params[2].length - 1));
@@ -87,7 +104,7 @@ const lineParse = (line: string, index: number, date: moment.Moment) => {
     }
 
     if (isCloseContact && line.indexOf("自称为密切接触者") === -1) {
-      info.reason = "密切接触";
+      info.reason = Reason.密切接触;
       // Step 3.5.1.2 上游密接信息
       const preCCParams = params
         .filter((one) => one.indexOf("密切接触") > -1)[0]
@@ -128,27 +145,23 @@ const lineParse = (line: string, index: number, date: moment.Moment) => {
       info.preCC = {
         publishMonth: preCCMonth,
         publishDay: preCCDay,
-        nu: preCCNu,
+        nu: getNu(preCCMonth, preCCDay, preCCNu),
       };
     }
     if (isScreen) {
-      info.reason = "核酸筛查";
+      info.reason = Reason.核酸筛查;
       const isAbnormal = line.indexOf("检测异常") > -1;
       info.isAbnormal = isAbnormal;
     }
 
     if (isSomeOneElse) {
-      info.reason = "区域确诊";
+      info.reason = Reason.区域确诊;
       info.areaType =
         line.indexOf("生活区域") > -1
-          ? "生活区域"
+          ? AreaType.生活区域
           : line.indexOf("工作区域") > -1
-          ? "工作区域"
-          : "";
-    }
-
-    if (firstFlag === 0) {
-      info.reason = "其他原因";
+          ? AreaType.工作区域
+          : AreaType.Empty;
     }
 
     if (info.isIsolate) {
@@ -170,23 +183,16 @@ const lineParse = (line: string, index: number, date: moment.Moment) => {
     }
 
     //检出日期
-    info.checkDay = {
-      year: parseInt(preDate.format("YYYY")),
-      month: parseInt(preDate.format("MM")),
-      day: parseInt(preDate.format("DD")),
-    };
+    info.checkDay = preDate;
     //发布日期
-    info.publishDay = {
-      year,
-      month,
-      day,
-    };
+    info.publishDay = date;
     //诊断类型
     const diagnosedParams = params.filter((one) => one.indexOf("诊断") > -1)[0];
-    info.diagnosed =
+    info.diagnosed = (
       diagnosedParams.indexOf("（") > -1
         ? diagnosedParams.split("（")[1].split("）")[0]
-        : "";
+        : ""
+    ) as Diagnosed;
 
     return info;
   } catch (error) {
@@ -229,5 +235,112 @@ const parse = (date: moment.Moment) => {
   const result = lines.map((line, index) => lineParse(line, index, date));
   return result;
 };
+
+export interface Node {
+  line: string;
+  nu: number;
+  gender: Gender;
+  age?: number;
+  address?: Address;
+  isIsolate?: boolean;
+  isKeyPerson?: boolean;
+  reason: Reason;
+  preCC?: PreCC;
+  isConcentrated?: boolean;
+  isolate?: moment.Moment;
+  checkDay: moment.Moment;
+  publishDay: moment.Moment;
+  diagnosed?: Diagnosed;
+  isAbnormal?: boolean;
+  areaType?: AreaType;
+}
+
+export interface Address {
+  city?: City;
+  country?: Country;
+  disctrict?: string;
+}
+
+export enum City {
+  现住西安鄠邑 = "现住西安鄠邑",
+  现住西安雁塔 = "现住西安雁塔",
+  现居住西安长安 = "现居住西安长安",
+  现居咸阳兴平 = "现居咸阳兴平",
+  现居咸阳泾阳 = "现居咸阳泾阳",
+  现居咸阳渭城 = "现居咸阳渭城",
+  现居咸阳渭城区居住地12月27日0时34分订正为西安 = "现居咸阳渭城区（居住地12月27日0时34分订正为西安",
+  现居咸阳秦都 = "现居咸阳秦都",
+  现居延安宝塔 = "现居延安宝塔",
+  现居渭南蒲城 = "现居渭南蒲城",
+  现居西安临潼 = "现居西安临潼",
+  现居西安新城 = "现居西安新城",
+  现居西安未央 = "现居西安未央",
+  现居西安未央区经开 = "现居西安未央区经开",
+  现居西安灞桥 = "现居西安灞桥",
+  现居西安灞桥区国际港务 = "现居西安灞桥区国际港务",
+  现居西安灞桥区浐灞生态 = "现居西安灞桥区浐灞生态",
+  现居西安现居西安 = "现居西安现居西安",
+  现居西安碑林 = "现居西安碑林",
+  现居西安莲湖 = "现居西安莲湖",
+  现居西安西咸新 = "现居西安西咸新",
+  现居西安西咸新区沣东新 = "现居西安西咸新区沣东新",
+  现居西安鄠邑 = "现居西安鄠邑",
+  现居西安长安 = "现居西安长安",
+  现居西安阎良 = "现居西安阎良",
+  现居西安雁塔 = "现居西安雁塔",
+  现居西安雁塔区曲江新 = "现居西安雁塔区曲江新",
+  现居西安高 = "现居西安高",
+  现居西安高新 = "现居西安高新",
+  经级专家组诊断为新冠肺炎确诊病例轻型 = "经级专家组诊断为新冠肺炎确诊病例（轻型",
+  西安长安 = "西安长安",
+}
+
+export enum Country {
+  Empty = "",
+  现居咸阳泾阳 = "现居咸阳泾阳",
+  现居渭南蒲城 = "现居渭南蒲城",
+}
+
+export enum AreaType {
+  工作区域 = "工作区域",
+  生活区域 = "生活区域",
+  Empty = "",
+}
+
+export interface Day {
+  year: number;
+  month: number;
+  day: number;
+}
+
+export enum Diagnosed {
+  Empty = "",
+  普通型 = "普通型",
+  轻型 = "轻型",
+}
+
+export enum Gender {
+  Empty = "",
+  女 = "女",
+  男 = "男",
+}
+
+export interface Isolate {
+  month?: number;
+  day?: number;
+}
+
+export interface PreCC {
+  publishMonth?: number;
+  publishDay?: number;
+  nu?: string;
+}
+
+export enum Reason {
+  其他原因 = "其他原因",
+  区域确诊 = "区域确诊",
+  密切接触 = "密切接触",
+  核酸筛查 = "核酸筛查",
+}
 
 export { parse };
